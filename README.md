@@ -31,9 +31,35 @@ Input:
   elevenLabs: {
     text: string,
     words: Array<{ text: string, start: number, end: number }>
+  },
+  partsOfSpeech?: {
+    [word: string]: "noun" | "verb" | "adjective"
   }
 }
 ```
+
+Optional `partsOfSpeech` helps the module choose the right expected stress for ambiguous words. For example, `record` as a noun is usually `RE-cord`, while `record` as a verb is usually `re-CORD`.
+
+```js
+const result = await analyzeAudioStress({
+  expectedText: "I record my voice",
+  audioBase64: "UklGR...",
+  elevenLabs: {
+    text: "I record my voice",
+    words: [
+      { text: "I", start: 0, end: 0.15 },
+      { text: "record", start: 0.2, end: 0.75 },
+      { text: "my", start: 0.8, end: 0.95 },
+      { text: "voice", start: 1, end: 1.35 }
+    ]
+  },
+  partsOfSpeech: {
+    record: "verb"
+  }
+});
+```
+
+Accepted values are `"noun"`, `"verb"`, and `"adjective"`. You only need to include words where part of speech matters or where your grammar engine already knows it.
 
 Output:
 

@@ -6,9 +6,10 @@ export async function analyzeAudioStress(input) {
     const wav = decodeWavBase64(normalized.audioBase64);
     const expectedWords = tokenize(normalized.expectedText);
     const transcriptWords = normalizeElevenLabsWords(normalized.elevenLabs.words);
+    const partsOfSpeech = normalizePartsOfSpeech(normalized.partsOfSpeech);
     const words = expectedWords.map((word, index) => {
       const syllables = splitSyllables(word);
-      const expectedStress = expectedStressForWord(word, syllables);
+      const expectedStress = expectedStressForWord(word, syllables, partsOfSpeech.get(word));
       const timing = transcriptWords[index];
       const observedStress = timing
         ? observedStressForWord(wav, timing, syllables)
@@ -61,6 +62,10 @@ function validateAndNormalizeInput(input) {
     throw new Error("elevenLabs.words must be an array.");
   }
 
+  if (input.partsOfSpeech !== undefined && typeof input.partsOfSpeech !== "object") {
+    throw new Error("partsOfSpeech must be an object when provided.");
+  }
+
   return input;
 }
 
@@ -96,7 +101,7 @@ function observedStressForWord(wav, timing, syllables) {
   return prominence.indexOf(Math.max(...prominence));
 }
 
-function expectedStressForWord(word, syllables) {
+function expectedStressForWord(word, syllables, partOfSpeech) {
   if (syllables.length === 0) {
     return null;
   }
@@ -119,8 +124,16 @@ function expectedStressForWord(word, syllables) {
     return Math.max(0, syllables.length - 3);
   }
 
-  if (syllables.length === 2 && (normalized.startsWith("a") || FRENCH_ORIGIN_ADJECTIVES.has(normalized))) {
+  if (syllables.length === 2 && partOfSpeech === "verb") {
     return 1;
+  }
+
+  if (syllables.length === 2 && (!partOfSpeech || partOfSpeech === "adjective") && (normalized.startsWith("a") || FRENCH_ORIGIN_ADJECTIVES.has(normalized))) {
+    return 1;
+  }
+
+  if (syllables.length > 2 && partOfSpeech === "verb") {
+    return Math.floor(syllables.length / 2);
   }
 
   return 0;
@@ -366,6 +379,32 @@ function normalizeWord(value) {
 function secondsToMs(value) {
   const seconds = Number(value);
   return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
+}
+
+function normalizePartsOfSpeech(partsOfSpeech) {
+  const normalized = new Map();
+
+  if (!partsOfSpeech || typeof partsOfSpeech !== "object") {
+    return normalized;
+  }
+
+  for (const [word, partOfSpeech] of Object.entries(partsOfSpeech)) {
+    const normalizedWord = normalizeWord(word);
+    const normalizedPartOfSpeech = normalizePartOfSpeech(partOfSpeech);
+    if (normalizedWord && normalizedPartOfSpeech) {
+      normalized.set(normalizedWord, normalizedPartOfSpeech);
+    }
+  }
+
+  return normalized;
+}
+
+function normalizePartOfSpeech(value) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (["v", "verb"].includes(normalized)) return "verb";
+  if (["n", "noun"].includes(normalized)) return "noun";
+  if (["adj", "adjective"].includes(normalized)) return "adjective";
+  return null;
 }
 
 function stressStatus(expectedStress, observedStress) {

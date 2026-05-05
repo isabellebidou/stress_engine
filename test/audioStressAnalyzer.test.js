@@ -91,6 +91,46 @@ test("analyzeAudioStress accepts ElevenLabs spacing tokens", async () => {
   assert.equal(result.words[1].word, "world");
 });
 
+test("analyzeAudioStress uses optional partsOfSpeech for ambiguous stress rules", async () => {
+  const audioBase64 = makeWav([0.18, 0.9]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "record",
+    audioBase64,
+    elevenLabs: {
+      text: "record",
+      words: [{ text: "record", start: 0, end: 0.4 }]
+    },
+    partsOfSpeech: {
+      record: "verb"
+    }
+  });
+
+  assert.deepEqual(result.words[0], {
+    word: "record",
+    expectedStress: 1,
+    observedStress: 1,
+    status: "match"
+  });
+});
+
+test("analyzeAudioStress defaults 2-syllable nouns to first-syllable stress", async () => {
+  const audioBase64 = makeWav([0.9, 0.18]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "record",
+    audioBase64,
+    elevenLabs: {
+      text: "record",
+      words: [{ text: "record", start: 0, end: 0.4 }]
+    },
+    partsOfSpeech: {
+      record: "noun"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 0);
+  assert.equal(result.words[0].status, "match");
+});
+
 test("analyzeAudioStress never throws for invalid input", async () => {
   const result = await analyzeAudioStress({
     expectedText: "polite",
