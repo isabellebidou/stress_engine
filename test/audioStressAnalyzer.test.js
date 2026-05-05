@@ -131,6 +131,178 @@ test("analyzeAudioStress defaults 2-syllable nouns to first-syllable stress", as
   assert.equal(result.words[0].status, "match");
 });
 
+test("analyzeAudioStress applies verb exceptions before verb defaults", async () => {
+  const audioBase64 = makeWav([0.9, 0.18]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "open",
+    audioBase64,
+    elevenLabs: {
+      text: "open",
+      words: [{ text: "open", start: 0, end: 0.4 }]
+    },
+    partsOfSpeech: {
+      open: "verb"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 0);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress applies noun adjective exceptions", async () => {
+  const audioBase64 = makeWav([0.18, 0.9]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "afraid",
+    audioBase64,
+    elevenLabs: {
+      text: "afraid",
+      words: [{ text: "afraid", start: 0, end: 0.4 }]
+    },
+    partsOfSpeech: {
+      afraid: "adjective"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 1);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress lets suffix rules override part of speech defaults", async () => {
+  const audioBase64 = makeWav([0.12, 0.85, 0.2, 0.15]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "ability",
+    audioBase64,
+    elevenLabs: {
+      text: "ability",
+      words: [{ text: "ability", start: 0, end: 0.8 }]
+    },
+    partsOfSpeech: {
+      ability: "noun"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 2);
+  assert.equal(result.words[0].observedStress, 1);
+  assert.equal(result.words[0].status, "mismatch");
+});
+
+test("analyzeAudioStress applies three syllable part of speech defaults", async () => {
+  const audioBase64 = makeWav([0.12, 0.85, 0.2]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "remember",
+    audioBase64,
+    elevenLabs: {
+      text: "remember",
+      words: [{ text: "remember", start: 0, end: 0.6 }]
+    },
+    partsOfSpeech: {
+      remember: "verb"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 1);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress falls back gracefully for unknown words", async () => {
+  const audioBase64 = makeWav([0.8, 0.2, 0.1, 0.1]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "customword",
+    audioBase64,
+    elevenLabs: {
+      text: "customword",
+      words: [{ text: "customword", start: 0, end: 0.8 }]
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.words[0].expectedStress, 0);
+});
+
+test("analyzeAudioStress lets lexical overrides beat suffix rules", async () => {
+  const audioBase64 = makeWav([0.9, 0.18, 0.12]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "quality",
+    audioBase64,
+    elevenLabs: {
+      text: "quality",
+      words: [{ text: "quality", start: 0, end: 0.6 }]
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 0);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress applies part of speech specific lexical overrides", async () => {
+  const audioBase64 = makeWav([0.9, 0.18]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "increase",
+    audioBase64,
+    elevenLabs: {
+      text: "increase",
+      words: [{ text: "increase", start: 0, end: 0.4 }]
+    },
+    partsOfSpeech: {
+      increase: "noun"
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 0);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress applies third syllable lexical overrides", async () => {
+  const audioBase64 = makeWav([0.12, 0.18, 0.9, 0.15]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "introduction",
+    audioBase64,
+    elevenLabs: {
+      text: "introduction",
+      words: [{ text: "introduction", start: 0, end: 0.8 }]
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 2);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress accepts runtime stress override additions", async () => {
+  const audioBase64 = makeWav([0.12, 0.9, 0.18]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "customword",
+    audioBase64,
+    elevenLabs: {
+      text: "customword",
+      words: [{ text: "customword", start: 0, end: 0.6 }]
+    },
+    stressOverrides: {
+      customword: 1
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 1);
+  assert.equal(result.words[0].status, "match");
+});
+
+test("analyzeAudioStress accepts runtime stress override removals", async () => {
+  const audioBase64 = makeWav([0.12, 0.9, 0.18]).toString("base64");
+  const result = await analyzeAudioStress({
+    expectedText: "quality",
+    audioBase64,
+    elevenLabs: {
+      text: "quality",
+      words: [{ text: "quality", start: 0, end: 0.6 }]
+    },
+    stressOverrides: {
+      quality: null
+    }
+  });
+
+  assert.equal(result.words[0].expectedStress, 1);
+  assert.equal(result.words[0].status, "match");
+});
+
 test("analyzeAudioStress never throws for invalid input", async () => {
   const result = await analyzeAudioStress({
     expectedText: "polite",

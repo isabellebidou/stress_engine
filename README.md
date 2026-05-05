@@ -34,6 +34,13 @@ Input:
   },
   partsOfSpeech?: {
     [word: string]: "noun" | "verb" | "adjective"
+  },
+  stressOverrides?: {
+    [word: string]: number | null | {
+      noun?: number,
+      verb?: number,
+      adjective?: number
+    }
   }
 }
 ```
@@ -60,6 +67,39 @@ const result = await analyzeAudioStress({
 ```
 
 Accepted values are `"noun"`, `"verb"`, and `"adjective"`. You only need to include words where part of speech matters or where your grammar engine already knows it.
+
+Rule priority:
+
+1. Lexical overrides in `STRESS_OVERRIDES` win first, including part-of-speech-specific overrides such as noun `increase`.
+2. Suffix rules apply next: `-tion`, `-sion`, `-ic`, and `-ity` use the configured relative stress.
+3. If `partsOfSpeech` is provided, the matching part-of-speech branch is used.
+4. Structured exceptions override the default for that branch, such as verb `open` using first-syllable stress.
+5. Unknown words fall back gracefully to first-syllable stress instead of throwing.
+
+The built-in override list lives in `core/stressOverrides.js` as `DEFAULT_STRESS_OVERRIDES`. Add or remove permanent entries there.
+
+You can also add, replace, or remove overrides per request with `stressOverrides`:
+
+```js
+const result = await analyzeAudioStress({
+  expectedText: "quality customword",
+  audioBase64: "UklGR...",
+  elevenLabs: {
+    text: "quality customword",
+    words: [
+      { text: "quality", start: 0, end: 0.6 },
+      { text: "customword", start: 0.7, end: 1.3 }
+    ]
+  },
+  stressOverrides: {
+    quality: null,       // remove built-in override for this request
+    customword: 1,        // add general override: second syllable
+    increase: { noun: 0, verb: 1 }
+  }
+});
+```
+
+Override values use zero-based indexes: `0` means first syllable, `1` means second, and `2` means third.
 
 Output:
 

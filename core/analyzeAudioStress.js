@@ -1,4 +1,39 @@
+import { DEFAULT_STRESS_OVERRIDES } from "./stressOverrides.js";
+
 const VOWELS = "aeiouy";
+
+const STRESS_RULES = {
+  twoSyllable: {
+    verbs: {
+      defaultStress: 1,
+      exceptions: [
+        "open", "enter", "answer", "follow", "happen", "offer",
+        "borrow", "argue", "focus", "order", "limit", "target"
+      ],
+      exceptionStress: 0
+    },
+    nounsAdjectives: {
+      defaultStress: 0,
+      exceptions: [
+        "alone", "alive", "afraid", "awake", "ashamed", "amazing",
+        "direct", "correct", "complete", "precise", "polite"
+      ],
+      exceptionStress: 1
+    }
+  },
+
+  suffixRules: [
+    { suffix: "tion", stress: -2 },
+    { suffix: "sion", stress: -2 },
+    { suffix: "ic", stress: -2 },
+    { suffix: "ity", stress: -2 }
+  ],
+
+  threeSyllable: {
+    verbs: { defaultStress: 1 },
+    nouns: { defaultStress: 0 }
+  }
+};
 
 export async function analyzeAudioStress(input) {
   try {
@@ -7,9 +42,10 @@ export async function analyzeAudioStress(input) {
     const expectedWords = tokenize(normalized.expectedText);
     const transcriptWords = normalizeElevenLabsWords(normalized.elevenLabs.words);
     const partsOfSpeech = normalizePartsOfSpeech(normalized.partsOfSpeech);
+    const stressOverrides = normalizeStressOverrides(normalized.stressOverrides);
     const words = expectedWords.map((word, index) => {
       const syllables = splitSyllables(word);
-      const expectedStress = expectedStressForWord(word, syllables, partsOfSpeech.get(word));
+      const expectedStress = expectedStressForWord(word, syllables, partsOfSpeech.get(word), stressOverrides);
       const timing = transcriptWords[index];
       const observedStress = timing
         ? observedStressForWord(wav, timing, syllables)
@@ -66,6 +102,10 @@ function validateAndNormalizeInput(input) {
     throw new Error("partsOfSpeech must be an object when provided.");
   }
 
+  if (input.stressOverrides !== undefined && typeof input.stressOverrides !== "object") {
+    throw new Error("stressOverrides must be an object when provided.");
+  }
+
   return input;
 }
 
@@ -101,7 +141,7 @@ function observedStressForWord(wav, timing, syllables) {
   return prominence.indexOf(Math.max(...prominence));
 }
 
-function expectedStressForWord(word, syllables, partOfSpeech) {
+function expectedStressForWord(word, syllables, partOfSpeech, stressOverrides) {
   if (syllables.length === 0) {
     return null;
   }
@@ -111,32 +151,106 @@ function expectedStressForWord(word, syllables, partOfSpeech) {
   }
 
   const normalized = normalizeWord(word);
-
-  if (/(tion|sion)$/.test(normalized) && syllables.length >= 2) {
-    return Math.max(0, syllables.length - 2);
+  const overrideStress = stressFromOverride(normalized, partOfSpeech, syllables.length, stressOverrides);
+  if (overrideStress !== null) {
+    return overrideStress;
   }
 
-  if (/ic$/.test(normalized) && syllables.length >= 2) {
-    return Math.max(0, syllables.length - 2);
+  const suffixStress = stressFromSuffixRule(normalized, syllables.length);
+  if (suffixStress !== null) {
+    return suffixStress;
   }
 
-  if (/ity$/.test(normalized) && syllables.length >= 3) {
-    return Math.max(0, syllables.length - 3);
+  if (syllables.length === 2) {
+    return stressForTwoSyllableWord(normalized, partOfSpeech);
   }
 
-  if (syllables.length === 2 && partOfSpeech === "verb") {
-    return 1;
-  }
-
-  if (syllables.length === 2 && (!partOfSpeech || partOfSpeech === "adjective") && (normalized.startsWith("a") || FRENCH_ORIGIN_ADJECTIVES.has(normalized))) {
-    return 1;
-  }
-
-  if (syllables.length > 2 && partOfSpeech === "verb") {
-    return Math.floor(syllables.length / 2);
+  if (syllables.length === 3) {
+    return stressForThreeSyllableWord(partOfSpeech);
   }
 
   return 0;
+}
+
+function stressFromOverride(word, partOfSpeech, syllableCount, stressOverrides) {
+  const override = stressOverrides.get(word);
+  if (override === undefined) {
+    return null;
+  }
+
+  if (Number.isInteger(override)) {
+    return resolveStressIndex(override, syllableCount);
+  }
+
+  if (partOfSpeech && Number.isInteger(override[partOfSpeech])) {
+    return resolveStressIndex(override[partOfSpeech], syllableCount);
+  }
+
+  return null;
+}
+
+function stressFromSuffixRule(word, syllableCount) {
+  const rule = STRESS_RULES.suffixRules.find((candidate) => word.endsWith(candidate.suffix));
+  if (!rule) {
+    return null;
+  }
+
+  return resolveStressIndex(rule.stress, syllableCount);
+}
+
+function stressForTwoSyllableWord(word, partOfSpeech) {
+  if (partOfSpeech === "verb") {
+    return stressFromRuleGroup(word, STRESS_RULES.twoSyllable.verbs);
+  }
+
+  if (partOfSpeech === "noun" || partOfSpeech === "adjective") {
+    return stressFromRuleGroup(word, STRESS_RULES.twoSyllable.nounsAdjectives);
+  }
+
+  const exceptionStress = stressFromTwoSyllableException(word);
+  if (exceptionStress !== null) {
+    return exceptionStress;
+  }
+
+  return STRESS_RULES.twoSyllable.nounsAdjectives.defaultStress;
+}
+
+function stressFromTwoSyllableException(word) {
+  const ruleGroups = [
+    STRESS_RULES.twoSyllable.verbs,
+    STRESS_RULES.twoSyllable.nounsAdjectives
+  ];
+
+  for (const ruleGroup of ruleGroups) {
+    if (ruleGroup.exceptions.includes(word)) {
+      return ruleGroup.exceptionStress;
+    }
+  }
+
+  return null;
+}
+
+function stressForThreeSyllableWord(partOfSpeech) {
+  if (partOfSpeech === "verb") {
+    return STRESS_RULES.threeSyllable.verbs.defaultStress;
+  }
+
+  if (partOfSpeech === "noun") {
+    return STRESS_RULES.threeSyllable.nouns.defaultStress;
+  }
+
+  return 0;
+}
+
+function stressFromRuleGroup(word, ruleGroup) {
+  return ruleGroup.exceptions.includes(word)
+    ? ruleGroup.exceptionStress
+    : ruleGroup.defaultStress;
+}
+
+function resolveStressIndex(stress, syllableCount) {
+  const index = stress < 0 ? syllableCount + stress : stress;
+  return Math.max(0, Math.min(syllableCount - 1, index));
 }
 
 function acousticProminence(samples, sampleRate, startMs, endMs) {
@@ -381,6 +495,61 @@ function secondsToMs(value) {
   return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
 }
 
+function normalizeStressOverrides(customOverrides) {
+  const overrides = new Map();
+
+  for (const [word, override] of Object.entries(DEFAULT_STRESS_OVERRIDES)) {
+    const normalizedWord = normalizeWord(word);
+    const normalizedOverride = normalizeStressOverrideValue(override);
+    if (normalizedWord && normalizedOverride !== null) {
+      overrides.set(normalizedWord, normalizedOverride);
+    }
+  }
+
+  if (!customOverrides || typeof customOverrides !== "object") {
+    return overrides;
+  }
+
+  for (const [word, override] of Object.entries(customOverrides)) {
+    const normalizedWord = normalizeWord(word);
+    if (!normalizedWord) {
+      continue;
+    }
+
+    if (override === null) {
+      overrides.delete(normalizedWord);
+      continue;
+    }
+
+    const normalizedOverride = normalizeStressOverrideValue(override);
+    if (normalizedOverride !== null) {
+      overrides.set(normalizedWord, normalizedOverride);
+    }
+  }
+
+  return overrides;
+}
+
+function normalizeStressOverrideValue(override) {
+  if (Number.isInteger(override)) {
+    return override;
+  }
+
+  if (!override || typeof override !== "object") {
+    return null;
+  }
+
+  const normalized = {};
+  for (const [partOfSpeech, stress] of Object.entries(override)) {
+    const normalizedPartOfSpeech = normalizePartOfSpeech(partOfSpeech);
+    if (normalizedPartOfSpeech && Number.isInteger(stress)) {
+      normalized[normalizedPartOfSpeech] = stress;
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
 function normalizePartsOfSpeech(partsOfSpeech) {
   const normalized = new Map();
 
@@ -429,18 +598,6 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-const FRENCH_ORIGIN_ADJECTIVES = new Set([
-  "antique",
-  "chic",
-  "elite",
-  "mature",
-  "obscure",
-  "polite",
-  "precise",
-  "severe",
-  "sincere",
-  "unique"
-]);
 
 const SPECIAL_SYLLABLES = new Map([
   ["about", ["a", "bout"]],
